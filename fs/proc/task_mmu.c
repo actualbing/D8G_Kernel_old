@@ -21,7 +21,6 @@
 #include <asm/elf.h>
 #include <asm/uaccess.h>
 #include <asm/tlbflush.h>
-#include <misc/d8g_helper.h>
 #include "internal.h"
 
 void task_mem(struct seq_file *m, struct mm_struct *mm)
@@ -188,13 +187,6 @@ static void vma_stop(struct proc_maps_private *priv)
 	up_read(&mm->mmap_sem);
 	mmput(mm);
 
-	if (set_pid_boost == 1) {
-		sched_migrate_to_cpumask_end(to_cpumask(&priv->old_cpus_allowed),
-						cpu_perf_mask);
-	} else if (set_pid_boost == 2) {
-		sched_migrate_to_cpumask_end(to_cpumask(&priv->old_cpus_allowed),
-						cpu_lp_mask);
-	}
 }
 
 static struct vm_area_struct *
@@ -230,14 +222,6 @@ static void *m_start(struct seq_file *m, loff_t *ppos)
 	mm = priv->mm;
 	if (!mm || !atomic_inc_not_zero(&mm->mm_users))
 		return NULL;
-
-	if (set_pid_boost == 1) {
-		sched_migrate_to_cpumask_start(to_cpumask(&priv->old_cpus_allowed),
-						cpu_perf_mask);
-	} else if (set_pid_boost == 2) {
-		sched_migrate_to_cpumask_start(to_cpumask(&priv->old_cpus_allowed),
-						cpu_lp_mask);
-	}
 
 	down_read(&mm->mmap_sem);
 	hold_task_mempolicy(priv);

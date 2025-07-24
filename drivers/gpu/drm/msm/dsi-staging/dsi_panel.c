@@ -18,7 +18,6 @@
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
-#include <misc/d8g_helper.h>
 #include <video/mipi_display.h>
 #include <linux/firmware.h>
 
@@ -32,7 +31,6 @@
 #include <asm/fcntl.h>
 
 #include <drm/drm_notifier.h>
-#include <misc/d8g_helper.h>
 #include <soc/qcom/socinfo.h>
 
 #ifdef CONFIG_KLAPSE
@@ -1615,22 +1613,10 @@ static int dsi_panel_parse_dfps_caps(struct dsi_dfps_capabilities *dfps_caps,
 	}
 
 getfps:
-	if (set_fps == 1) {
-		dfps_caps->max_refresh_rate = dfps_caps->dfps_list[1];
-		dfps_caps->min_refresh_rate = dfps_caps->dfps_list[1];
-	} else if (set_fps == 2) {
-		dfps_caps->max_refresh_rate = dfps_caps->dfps_list[2];
-		dfps_caps->min_refresh_rate = dfps_caps->dfps_list[2];
-	} else if (set_fps == 3) {
-		dfps_caps->max_refresh_rate = dfps_caps->dfps_list[3];
-		dfps_caps->min_refresh_rate = dfps_caps->dfps_list[3];
-	} else if (set_fps == 4) {
-		dfps_caps->max_refresh_rate = dfps_caps->dfps_list[4];
-		dfps_caps->min_refresh_rate = dfps_caps->dfps_list[4];
-	} else {
-		dfps_caps->max_refresh_rate = dfps_caps->dfps_list[0];
-		dfps_caps->min_refresh_rate = dfps_caps->dfps_list[0];
-	}
+
+	dfps_caps->max_refresh_rate = dfps_caps->dfps_list[0];
+	dfps_caps->min_refresh_rate = dfps_caps->dfps_list[0];
+
 	goto getfps;
 
 error:
@@ -4147,9 +4133,6 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
 		       panel->name, rc);
-
-	oplus_panel_status = 3; // DISPLAY_POWER_DOZE
-
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4171,9 +4154,6 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 		       panel->name, rc);
-
-	oplus_panel_status = 4; // DISPLAY_POWER_DOZE_SUSPEND
-
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4198,9 +4178,6 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 
 	panel->fod_hbm_enabled = false;
 	panel->in_aod = false;
-
-	oplus_panel_status = 2; // DISPLAY_POWER_ON
-
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4959,8 +4936,6 @@ int dsi_panel_disable(struct dsi_panel *panel)
 	panel->fod_hbm_enabled = false;
 	panel->in_aod = false;
 	panel->fod_hbm_off_time = ktime_get();
-
-	oplus_panel_status = 0; // DISPLAY_POWER_OFF
 
 error:
 	mutex_unlock(&panel->panel_lock);

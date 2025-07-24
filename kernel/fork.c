@@ -84,7 +84,6 @@
 #include <linux/cpu_input_boost.h>
 #include <linux/devfreq_boost.h>
 #include <linux/scs.h>
-#include <misc/d8g_helper.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -2116,7 +2115,7 @@ long _do_fork(unsigned long clone_flags,
 	long nr;
 
 	/* Boost CPU to the max for 50 ms when userspace launches an app */
-	if (boost_gpu && !limited & task_is_zygote(current)) {
+	if (boost_gpu & task_is_zygote(current)) {
 		cpu_input_boost_kick_max(1000);
 		devfreq_boost_kick_max(DEVFREQ_MSM_LLCCBW, 1000);
 		devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 1000);

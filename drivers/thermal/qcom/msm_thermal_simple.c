@@ -83,9 +83,6 @@ static void thermal_throttle_worker(struct work_struct *work)
 	/* Checking GPU temperature */
 	thermal_zone_get_temp(thermal_zone_get_zone_by_name("gpu0-usr"), &temp_gpu);
 
-	/* Now let's also get battery temperature */
-	thermal_zone_get_temp(thermal_zone_get_zone_by_name("battery"), &temp_batt);
-
 	/* (Number of CPUs * 8) + current temp of the GPU,
 	   this will add an overlay on top of the current cpu
 	   temperature and make the thermal_simple driver set 
@@ -93,79 +90,33 @@ static void thermal_throttle_worker(struct work_struct *work)
 	   games or GPU heavy tasks while maintaining good CPU
 	   performance in CPU only tasks */
 
-	if (throttle_mode) {
-		/* HQ autism coming up */
-		if (temp_batt <= 29000)
-			temp_avg = (temp_cpus_avg * 2 + temp_batt * 3) / 5;
-		else if (temp_batt > 30000 && temp_batt <= 37000)
-			temp_avg = (temp_cpus_avg * 3 + temp_batt * 2) / 5;
-		else if (temp_batt > 37000 && temp_batt <= 43000)
-			temp_avg = (temp_cpus_avg * 4 + temp_batt) / 5;
-		else if (temp_batt > 43000)
-			temp_avg = (temp_cpus_avg * 5 + temp_batt) / 6;
+	if (temp_gpu >= 63000)
+		/* GPU started to get hot, using base values
+		so throttling is not so agressive at this point. */
+		temp_avg = (temp_total + 35000) / NR_CPUS;
+	else if (temp_gpu >= 65000)
+		temp_avg = (temp_total + 55000) / NR_CPUS;
+	else if (temp_gpu >= 68000)
+		temp_avg = (temp_total + 65000) / NR_CPUS;
+	else if (temp_gpu >= 70000)
+		temp_avg = (temp_total + temp_gpu) / NR_CPUS;
 
-		/* Emergency case */
-		if (temp_cpus_avg > 90000)
-			temp_avg = (temp_cpus_avg * 6 + temp_batt) / 7;
-	} else {
-		if (temp_gpu >= 63000)
-			/* GPU started to get hot, using base values
-			so throttling is not so agressive at this point. */
-			temp_avg = (temp_total + 35000) / NR_CPUS;
-		else if (temp_gpu >= 65000)
-			temp_avg = (temp_total + 55000) / NR_CPUS;
-		else if (temp_gpu >= 68000)
-			temp_avg = (temp_total + 65000) / NR_CPUS;
-		else if (temp_gpu >= 70000)
-			temp_avg = (temp_total + temp_gpu) / NR_CPUS;
-	}
-	
-	/* Dynamic charging coming up */
-	if (dynamic_charger) {
-		if (temp_batt <= 30000) {
-			dc_set = 0;
-		} else if (temp_batt > 30000 && temp_batt <= 34000) {
-			dc_set = 2;
-		} else if (temp_batt > 34000 && temp_batt <= 38000) {
-			dc_set = 3;
-		} else if (temp_batt > 38000 && temp_batt <= 40000) {
-			dc_set = 4;
-		} else if (temp_batt > 40000 && temp_batt <= 45000) {
-			dc_set = 5;
-		} else if (temp_batt > 45000) {
-			dc_set = 6;
-		}
-	} else {
-		dc_set = 0;
-	}
+	dc_set = 0;
 
 	temp_avg_show = temp_avg;
 	dc_show = dc_set;
 	old_zone = t->curr_zone;
 	new_zone = NULL;
 
-	if (!limited && gamer) {
-		temp_gpu = 0;
-		temp_avg = 0;
-		old_zone = NULL;
-		new_zone = NULL;
-	} else {
-		if (!limited && set_pid_boost == 2) {
-			if (temp_avg > 78000) 
-				temp_avg = 78000;
+	for (i = t->nr_zones - 1; i >= 0; i--) {
+		if (temp_avg >= t->zones[i].trip_deg) {
+			new_zone = t->zones + i;
+			break;
 		}
-		for (i = t->nr_zones - 1; i >= 0; i--) {
-			if (temp_avg >= t->zones[i].trip_deg) {
-				new_zone = t->zones + i;
-				break;
-			}
-		}
+	}
 
 		/* Update thermal zone if it changed */
 		if (new_zone != old_zone) {
-			if (throttle_mode)
-				pr_info("temp_avg: %i, temp_batt: %i\n", temp_avg, temp_batt);
-			else
 				pr_info("temp_avg: %i, temp_gpu: %i\n", temp_avg, temp_gpu);
 			t->curr_zone = new_zone;
 			update_online_cpu_policy();

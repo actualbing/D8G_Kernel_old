@@ -30,7 +30,6 @@
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
-#include <linux/hid_magic.h>
 #ifdef CONFIG_SMP
 #include <linux/sched.h>
 #endif
@@ -2327,8 +2326,6 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	ret = cpufreq_driver->verify(new_policy);
 	if (ret)
 		return ret;
-
-	restrict_frequency(new_policy);
 
 	/* adjust if necessary - all reasons */
 	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,

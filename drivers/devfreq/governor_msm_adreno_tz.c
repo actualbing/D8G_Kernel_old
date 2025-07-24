@@ -15,7 +15,6 @@
 #include <asm/cacheflush.h>
 #include <drm/drm_refresh_rate.h>
 #include <soc/qcom/scm.h>
-#include <misc/d8g_helper.h>
 #include "governor.h"
 
 static DEFINE_SPINLOCK(tz_lock);
@@ -408,9 +407,6 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq, u32 
 #if 1
 	// scale busy time up based on adrenoboost parameter, only if MIN_BUSY exceeded...
 	if ((unsigned int)(priv->bin.busy_time + stats.busy_time) >= MIN_BUSY) {
-		if (limited)
-			priv->bin.busy_time += stats.busy_time;
-		else
 			priv->bin.busy_time += stats.busy_time * (1 + (adrenoboost*3)/2);
 	} else {
 		priv->bin.busy_time += stats.busy_time;
