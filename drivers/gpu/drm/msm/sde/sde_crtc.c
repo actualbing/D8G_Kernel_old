@@ -23,7 +23,6 @@
 #include <linux/ktime.h>
 #include <linux/cpu_input_boost.h>
 #include <linux/devfreq_boost.h>
-#include <misc/d8g_helper.h>
 #include <uapi/drm/sde_drm.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_crtc.h>
@@ -3985,10 +3984,10 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 
 	SDE_ATRACE_BEGIN("crtc_commit");
 
-	if (oprofile != 4 && oprofile != 0) { 
+	if(!boost_gpu)
 		cpu_input_boost_kick();
+	if(!boost_gpu)
 		devfreq_boost_kick(DEVFREQ_MSM_CPUBW);
-	}
 
 	is_error = _sde_crtc_prepare_for_kickoff_rot(dev, crtc);
 

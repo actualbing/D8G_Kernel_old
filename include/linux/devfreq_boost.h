@@ -14,12 +14,16 @@
 #define _DEVFREQ_BOOST_H_
 
 #include <linux/devfreq.h>
+#include <linux/moduleparam.h>
 
 enum df_device {
 	DEVFREQ_MSM_CPUBW,
 	DEVFREQ_MSM_LLCCBW,
 	DEVFREQ_MAX
 };
+
+static int boost_gpu = 0;
+module_param(boost_gpu, int, 0644);
 
 struct boost_dev {
 	struct workqueue_struct *wq;

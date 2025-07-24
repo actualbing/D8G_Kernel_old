@@ -3867,16 +3867,10 @@ retry:
 		goto nopage;
 
 	/* Boost when memory is low so allocation latency doesn't get too bad */
-	if (oprofile !=4 && !limited) {
-		if (oprofile == 0) {
-			cpu_input_boost_kick_max(250);
-			devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 250);
-			devfreq_boost_kick_max(DEVFREQ_MSM_LLCCBW, 250);
-		} else {
-			cpu_input_boost_kick_max(500);
-			devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 500);
-			devfreq_boost_kick_max(DEVFREQ_MSM_LLCCBW, 500);
-		}
+	if (boost_gpu && !limited) {
+		cpu_input_boost_kick_max(500);
+		devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 500);
+		devfreq_boost_kick_max(DEVFREQ_MSM_LLCCBW, 500);
 	}
 
 	if (should_reclaim_retry(gfp_mask, order, ac, alloc_flags,

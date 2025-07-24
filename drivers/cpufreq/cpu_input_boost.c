@@ -20,7 +20,6 @@
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
 #include <linux/cpuset.h>
-#include <misc/d8g_helper.h>
 
 static unsigned int input_boost_freq_lp = CONFIG_INPUT_BOOST_FREQ_LP;
 static unsigned int input_boost_freq_hp = CONFIG_INPUT_BOOST_FREQ_PERF;
@@ -117,7 +116,7 @@ void cpu_input_boost_kick(void)
 {
 	struct boost_drv *b = boost_drv_g;
 
-	if (!b || oprofile == 4)
+	if (!b)
 		return;
 
 	queue_work(b->wq, &b->input_boost);
@@ -148,7 +147,7 @@ void cpu_input_boost_kick_max(unsigned int duration_ms)
 {
 	struct boost_drv *b = boost_drv_g;
 
-	if (!b || oprofile == 4)
+	if (!b)
 		return;
 	
 	__cpu_input_boost_kick_max(b, duration_ms);
