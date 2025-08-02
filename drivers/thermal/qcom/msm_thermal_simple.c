@@ -111,7 +111,6 @@ static void thermal_throttle_worker(struct work_struct *work)
 			break;
 		}
 	}
-}
 
 		/* Update thermal zone if it changed */
 		if (new_zone != old_zone) {
@@ -119,7 +118,7 @@ static void thermal_throttle_worker(struct work_struct *work)
 			t->curr_zone = new_zone;
 			update_online_cpu_policy();
 		}
-	}
+}
 
 
 static u32 get_throttle_freq(struct thermal_zone *zone, u32 cpu)
