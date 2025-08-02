@@ -13,7 +13,6 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 #include <linux/moduleparam.h>
-#include <misc/d8g_helper.h>
 
 int dc_set __read_mostly;
 
@@ -103,8 +102,6 @@ static void thermal_throttle_worker(struct work_struct *work)
 
 	dc_set = 0;
 
-	temp_avg_show = temp_avg;
-	dc_show = dc_set;
 	old_zone = t->curr_zone;
 	new_zone = NULL;
 
@@ -114,6 +111,7 @@ static void thermal_throttle_worker(struct work_struct *work)
 			break;
 		}
 	}
+}
 
 		/* Update thermal zone if it changed */
 		if (new_zone != old_zone) {
@@ -123,8 +121,6 @@ static void thermal_throttle_worker(struct work_struct *work)
 		}
 	}
 
-	queue_delayed_work(t->wq, &t->throttle_work, t->poll_jiffies);
-}
 
 static u32 get_throttle_freq(struct thermal_zone *zone, u32 cpu)
 {
