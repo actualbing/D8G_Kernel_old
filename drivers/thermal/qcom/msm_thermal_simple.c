@@ -25,6 +25,8 @@ int dc_set __read_mostly;
 	ret;									\
 })
 
+#define WINDOW 5
+
 struct thermal_zone {
 	u32 gold_khz;
 	u32 prime_khz;
@@ -41,6 +43,9 @@ struct thermal_drv {
 	u32 poll_jiffies;
 	u32 start_delay;
 	u32 nr_zones;
+	int temp_history[WINDOW];
+	int temp_index;
+	bool wait;
 };
 
 static bool throttle_enabled = true; // Default: thermal throttling enabled
@@ -72,7 +77,7 @@ static void thermal_throttle_worker(struct work_struct *work)
 					     throttle_work);
 	struct thermal_zone *new_zone, *old_zone;
 	int temp = 0, temp_gpu = 0, temp_cpus_avg = 0, temp_batt = 0;
-	s64 temp_total = 0, temp_avg = 0;
+	s64 temp_sum = 0, temp_avg = 0;
 	short i = 0;
 
 	/* Return if thermal throttling disabled */
@@ -84,11 +89,11 @@ static void thermal_throttle_worker(struct work_struct *work)
 		char zone_name[15];
 		sprintf(zone_name, "cpu%i-gold-usr", i);
 		thermal_zone_get_temp(thermal_zone_get_zone_by_name(zone_name), &temp);
-		temp_total += temp;
+		temp_sum += temp;
 	}
 
-	temp_avg = temp_total / NR_CPUS;
-	temp_cpus_avg = temp_total / NR_CPUS;
+	temp_avg = temp_sum / NR_CPUS;
+	temp_cpus_avg = temp_sum / NR_CPUS;
 
 	/* Checking GPU temperature */
 	thermal_zone_get_temp(thermal_zone_get_zone_by_name("gpu0-usr"), &temp_gpu);
@@ -121,19 +126,49 @@ static void thermal_throttle_worker(struct work_struct *work)
 		if (temp_gpu >= 63000)
 			/* GPU started to get hot, using base values
 			so throttling is not so agressive at this point. */
-			temp_avg = (temp_total + 35000) / NR_CPUS;
+			temp_avg = (temp_sum + 35000) / NR_CPUS;
 		else if (temp_gpu >= 65000)
-			temp_avg = (temp_total + 55000) / NR_CPUS;
+			temp_avg = (temp_sum + 55000) / NR_CPUS;
 		else if (temp_gpu >= 68000)
-			temp_avg = (temp_total + 65000) / NR_CPUS;
+			temp_avg = (temp_sum + 65000) / NR_CPUS;
 		else if (temp_gpu >= 70000)
-			temp_avg = (temp_total + temp_gpu) / NR_CPUS;
+			temp_avg = (temp_sum + temp_gpu) / NR_CPUS;
 	}
 
 	dc_set = 0;
 	old_zone = t->curr_zone;
 	new_zone = NULL;
-	
+
+	// Store the current temperature
+	t->temp_history[t->temp_index] = temp_final;
+	t->temp_index = (t->temp_index + 1) % WINDOW;
+
+	// Wait until history is ready
+	if (t->wait) {
+		if (t->temp_index == 0) {
+			pr_info("init 100%%\n");
+			t->wait = false;
+		} else {
+			pr_info("init %i%%\n", (t->temp_index * 100) / WINDOW);
+			queue_delayed_work(t->wq, &t->throttle_work, t->poll_jiffies);
+			return;
+		}
+	}
+
+	// Calculate average temperatures
+	temp_sum = 0;
+	for (i = 0; i < WINDOW; i++) {
+		temp_sum += t->temp_history[i];
+	}
+	temp_final = temp_sum / WINDOW;
+
+	for (i = t->nr_zones - 1; i >= 0; i--) {
+		if (temp_final >= t->zones[i].trip_deg) {
+			new_zone = t->zones + i;
+			break;
+		}
+	}
+
 	for (i = t->nr_zones - 1; i >= 0; i--) {
 		if (temp_avg >= t->zones[i].trip_deg) {
 			new_zone = t->zones + i;
@@ -320,6 +355,11 @@ static int msm_thermal_simple_probe(struct platform_device *pdev)
 	ret = msm_thermal_simple_parse_dt(pdev, t);
 	if (ret)
 		goto destroy_wq;
+
+	/* Initialize the temperature history with 0 */
+	memset(t->temp_history, 0, sizeof(t->temp_history));
+	t->temp_index = 0;
+	t->wait = true;
 
 	/* Set the priority to INT_MIN so throttling can't be tampered with */
 	t->cpu_notif.notifier_call = cpu_notifier_cb;
