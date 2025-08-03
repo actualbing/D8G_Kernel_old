@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/thermal.h>
 #include <linux/moduleparam.h>
+#include <linux/sysfs.h>
 
 int dc_set __read_mostly;
 
@@ -26,6 +27,7 @@ int dc_set __read_mostly;
 
 struct thermal_zone {
 	u32 gold_khz;
+	u32 prime_khz;
 	u32 silver_khz;
 	s32 trip_deg;
 };
@@ -41,6 +43,9 @@ struct thermal_drv {
 	u32 nr_zones;
 };
 
+static bool throttle_enabled = true; // Default: thermal throttling enabled
+static struct thermal_drv *thermal_drv_instance;
+
 static void update_online_cpu_policy(void)
 {
 	unsigned int cpu;
@@ -51,6 +56,8 @@ static void update_online_cpu_policy(void)
 			if (cpumask_intersects(cpumask_of(cpu), cpu_lp_mask))
 				cpufreq_update_policy(cpu);
 			if (cpumask_intersects(cpumask_of(cpu), cpu_perf_mask))
+				cpufreq_update_policy(cpu);
+			if (cpumask_intersects(cpumask_of(cpu), cpu_prime_mask))
 				cpufreq_update_policy(cpu);
 		}
 	}
@@ -64,9 +71,13 @@ static void thermal_throttle_worker(struct work_struct *work)
 	struct thermal_drv *t = container_of(to_delayed_work(work), typeof(*t),
 					     throttle_work);
 	struct thermal_zone *new_zone, *old_zone;
-	int temp = 0, temp_gpu = 0, temp_cpus_avg = 0;
+	int temp = 0, temp_gpu = 0, temp_cpus_avg = 0, temp_batt = 0;
 	s64 temp_total = 0, temp_avg = 0;
 	short i = 0;
+
+	/* Return if thermal throttling disabled */
+	if (!throttle_enabled)
+		return;
 
 	/* Store average temperature of all CPU cores */
 	for (i; i < NR_CPUS; i++) {
@@ -82,6 +93,9 @@ static void thermal_throttle_worker(struct work_struct *work)
 	/* Checking GPU temperature */
 	thermal_zone_get_temp(thermal_zone_get_zone_by_name("gpu0-usr"), &temp_gpu);
 
+	/* Now let's also get battery temperature */
+	thermal_zone_get_temp(thermal_zone_get_zone_by_name("battery"), &temp_batt);
+
 	/* (Number of CPUs * 8) + current temp of the GPU,
 	   this will add an overlay on top of the current cpu
 	   temperature and make the thermal_simple driver set 
@@ -89,22 +103,37 @@ static void thermal_throttle_worker(struct work_struct *work)
 	   games or GPU heavy tasks while maintaining good CPU
 	   performance in CPU only tasks */
 
-	if (temp_gpu >= 63000)
-		/* GPU started to get hot, using base values
-		so throttling is not so agressive at this point. */
-		temp_avg = (temp_total + 35000) / NR_CPUS;
-	else if (temp_gpu >= 65000)
-		temp_avg = (temp_total + 55000) / NR_CPUS;
-	else if (temp_gpu >= 68000)
-		temp_avg = (temp_total + 65000) / NR_CPUS;
-	else if (temp_gpu >= 70000)
-		temp_avg = (temp_total + temp_gpu) / NR_CPUS;
+	if (throttle_enabled) {
+		/* HQ autism coming up */
+		if (temp_batt <= 29000)
+			temp_avg = (temp_cpus_avg * 2 + temp_batt * 3) / 5;
+		else if (temp_batt > 30000 && temp_batt <= 37000)
+			temp_avg = (temp_cpus_avg * 3 + temp_batt * 2) / 5;
+		else if (temp_batt > 37000 && temp_batt <= 43000)
+			temp_avg = (temp_cpus_avg * 4 + temp_batt) / 5;
+		else if (temp_batt > 43000)
+			temp_avg = (temp_cpus_avg * 5 + temp_batt) / 6;
+
+		/* Emergency case */
+		if (temp_cpus_avg > 90000)
+			temp_avg = (temp_cpus_avg * 6 + temp_batt) / 7;
+	} else {
+		if (temp_gpu >= 63000)
+			/* GPU started to get hot, using base values
+			so throttling is not so agressive at this point. */
+			temp_avg = (temp_total + 35000) / NR_CPUS;
+		else if (temp_gpu >= 65000)
+			temp_avg = (temp_total + 55000) / NR_CPUS;
+		else if (temp_gpu >= 68000)
+			temp_avg = (temp_total + 65000) / NR_CPUS;
+		else if (temp_gpu >= 70000)
+			temp_avg = (temp_total + temp_gpu) / NR_CPUS;
+	}
 
 	dc_set = 0;
-
 	old_zone = t->curr_zone;
 	new_zone = NULL;
-
+	
 	for (i = t->nr_zones - 1; i >= 0; i--) {
 		if (temp_avg >= t->zones[i].trip_deg) {
 			new_zone = t->zones + i;
@@ -112,21 +141,28 @@ static void thermal_throttle_worker(struct work_struct *work)
 		}
 	}
 
-		/* Update thermal zone if it changed */
-		if (new_zone != old_zone) {
-				pr_info("temp_avg: %i, temp_gpu: %i\n", temp_avg, temp_gpu);
-			t->curr_zone = new_zone;
-			update_online_cpu_policy();
-		}
-}
+	/* Update thermal zone if it changed */
+	if (new_zone != old_zone) {
+		if (throttle_enabled)
+			pr_info("temp_avg: %i, temp_batt: %i\n", temp_avg, temp_batt);
+		else
+			pr_info("temp_avg: %i, temp_gpu: %i\n", temp_avg, temp_gpu);
+		t->curr_zone = new_zone;
+		update_online_cpu_policy();
+	}
 
+	queue_delayed_work(t->wq, &t->throttle_work, t->poll_jiffies);
+
+}
 
 static u32 get_throttle_freq(struct thermal_zone *zone, u32 cpu)
 {
 	if (cpumask_test_cpu(cpu, cpu_lp_mask))
 		return zone->silver_khz;
+	else if (cpumask_test_cpu(cpu, cpu_perf_mask))
+		return zone->gold_khz;
 
-	return zone->gold_khz;
+	return zone->prime_khz;
 }
 
 static int cpu_notifier_cb(struct notifier_block *nb, unsigned long val,
@@ -141,7 +177,7 @@ static int cpu_notifier_cb(struct notifier_block *nb, unsigned long val,
 
 	zone = t->curr_zone;
 
-	if (zone) {
+	if (zone && throttle_enabled) {
 		u32 target_freq = get_throttle_freq(zone, policy->cpu);
 
 		if (target_freq < policy->max)
@@ -203,6 +239,10 @@ static int msm_thermal_simple_parse_dt(struct platform_device *pdev,
 		if (ret)
 			goto free_zones;
 
+		ret = OF_READ_U32(child, "qcom,prime-khz", zone->prime_khz);
+		if (ret)
+			goto free_zones;
+
 		ret = OF_READ_U32(child, "qcom,trip-deg", zone->trip_deg);
 		if (ret)
 			goto free_zones;
@@ -213,6 +253,52 @@ static int msm_thermal_simple_parse_dt(struct platform_device *pdev,
 free_zones:
 	kfree(t->zones);
 	return ret;
+}
+
+static ssize_t throttle_enabled_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", throttle_enabled);
+}
+
+static ssize_t throttle_enabled_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int value;
+	if (kstrtoint(buf, 10, &value))
+		return -EINVAL;
+
+	throttle_enabled = (value != 0);
+	pr_info("Thermal throttling %s\n", throttle_enabled ? "enabled" : "disabled");
+
+	if (throttle_enabled && thermal_drv_instance) {
+		struct thermal_drv *t = thermal_drv_instance;
+		memset(t->temp_history, 0, sizeof(t->temp_history));
+		t->temp_index = 0;
+		t->wait = true;
+		queue_delayed_work(t->wq, &t->throttle_work, t->poll_jiffies);
+	}
+
+	return count;
+}
+
+static struct kobj_attribute throttle_enabled_attr = __ATTR(throttle_enabled, 0644, throttle_enabled_show, throttle_enabled_store);
+
+static struct kobject *thermal_kobj;
+
+static int create_sysfs_interface(void)
+{
+	int ret;
+
+	thermal_kobj = kobject_create_and_add("msm_thermal_simple", kernel_kobj);
+	if (!thermal_kobj)
+		return -ENOMEM;
+
+	ret = sysfs_create_file(thermal_kobj, &throttle_enabled_attr.attr);
+	if (ret) {
+		kobject_put(thermal_kobj);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int msm_thermal_simple_probe(struct platform_device *pdev)
@@ -244,12 +330,23 @@ static int msm_thermal_simple_probe(struct platform_device *pdev)
 		goto free_zones;
 	}
 
+	/* Initialize sysfs thermal throttling switch */
+	ret = create_sysfs_interface();
+	if (ret) {
+		pr_err("Failed to create sysfs interface, err: %d\n", ret);
+		goto cpufreq_unregister;
+	}
+
 	/* Fire up the persistent worker */
 	INIT_DELAYED_WORK(&t->throttle_work, thermal_throttle_worker);
 	queue_delayed_work(t->wq, &t->throttle_work, t->start_delay * HZ);
 
+	thermal_drv_instance = t;
+
 	return 0;
 
+cpufreq_unregister:
+	cpufreq_unregister_notifier(&t->cpu_notif, CPUFREQ_POLICY_NOTIFIER);
 free_zones:
 	kfree(t->zones);
 destroy_wq:
