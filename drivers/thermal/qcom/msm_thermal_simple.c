@@ -140,7 +140,7 @@ static void thermal_throttle_worker(struct work_struct *work)
 	new_zone = NULL;
 
 	// Store the current temperature
-	t->temp_history[t->temp_index] = temp_final;
+	t->temp_history[t->temp_index] = temp_avg;
 	t->temp_index = (t->temp_index + 1) % WINDOW;
 
 	// Wait until history is ready
@@ -160,10 +160,10 @@ static void thermal_throttle_worker(struct work_struct *work)
 	for (i = 0; i < WINDOW; i++) {
 		temp_sum += t->temp_history[i];
 	}
-	temp_final = temp_sum / WINDOW;
+	temp_avg = temp_sum / WINDOW;
 
 	for (i = t->nr_zones - 1; i >= 0; i--) {
-		if (temp_final >= t->zones[i].trip_deg) {
+		if (temp_avg >= t->zones[i].trip_deg) {
 			new_zone = t->zones + i;
 			break;
 		}
